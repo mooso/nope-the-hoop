@@ -10,7 +10,7 @@ use tracing::info;
 )]
 struct Args {
     /// The port to bind to.
-    #[arg(short, long, default_value_t = 0)]
+    #[arg(short, long, default_value_t = 7434)]
     port: u16,
 
     /// The address to bind to.
