@@ -8,7 +8,7 @@ pub enum Role {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub enum Command {
+pub enum Message {
     EstablishRole(Role),
 }
 
@@ -21,10 +21,10 @@ fn should_break(io_error_kind: ErrorKind) -> bool {
     }
 }
 
-pub fn read_commands(mut stream: impl Read) -> anyhow::Result<Vec<Command>> {
+pub fn read_messages(mut stream: impl Read) -> anyhow::Result<Vec<Message>> {
     let mut commands = vec![];
     loop {
-        let result = ciborium::from_reader::<Command, _>(&mut stream);
+        let result = ciborium::from_reader::<Message, _>(&mut stream);
         match result {
             Ok(result) => commands.push(result),
             Err(ciborium::de::Error::Io(e)) if should_break(e.kind()) => {
@@ -36,7 +36,7 @@ pub fn read_commands(mut stream: impl Read) -> anyhow::Result<Vec<Command>> {
     Ok(commands)
 }
 
-pub fn write_command(mut stream: impl Write, command: &Command) -> anyhow::Result<()> {
+pub fn write_message(mut stream: impl Write, command: &Message) -> anyhow::Result<()> {
     ciborium::ser::into_writer(command, &mut stream)?;
     Ok(())
 }
@@ -48,14 +48,14 @@ mod tests {
     #[test]
     fn roundtrip() {
         let mut buf = vec![];
-        let commands = vec![
-            Command::EstablishRole(Role::Hoop { x: 1.0 }),
-            Command::EstablishRole(Role::Hoop { x: 2.0 }),
+        let messages = vec![
+            Message::EstablishRole(Role::Hoop { x: 1.0 }),
+            Message::EstablishRole(Role::Hoop { x: 2.0 }),
         ];
-        for command in &commands {
-            write_command(&mut buf, command).expect("write_command");
+        for message in &messages {
+            write_message(&mut buf, message).expect("write_command");
         }
-        let result = read_commands(&*buf).expect("read_commands");
-        assert_eq!(commands, result);
+        let result = read_messages(&*buf).expect("read_commands");
+        assert_eq!(messages, result);
     }
 }

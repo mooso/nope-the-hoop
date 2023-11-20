@@ -2,7 +2,7 @@ use std::net::TcpStream;
 
 use bevy::{prelude::*, sprite::MaterialMesh2dBundle};
 use clap::Parser;
-use nope_the_hoop_proto::{read_commands, Command, Role};
+use nope_the_hoop_proto::{read_messages, Message, Role};
 
 #[derive(Parser)]
 #[command(
@@ -55,13 +55,13 @@ fn update_from_server(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let server_commands = read_commands(&mut server.0).unwrap_or_else(|e| {
+    let messages = read_messages(&mut server.0).unwrap_or_else(|e| {
         error!("Failed to read commands from server: {}", e);
         std::process::exit(1);
     });
-    for command in server_commands {
-        match command {
-            Command::EstablishRole(Role::Hoop { x }) => {
+    for message in messages {
+        match message {
+            Message::EstablishRole(Role::Hoop { x }) => {
                 commands.spawn((
                     MaterialMesh2dBundle {
                         mesh: meshes
