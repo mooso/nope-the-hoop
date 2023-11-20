@@ -1,5 +1,37 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+use std::io::{ErrorKind, Read, Write};
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum Role {
+    Hoop { x: f32 },
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum Command {
+    EstablishRole(Role),
+}
+
+pub fn read_commands(mut stream: impl Read) -> anyhow::Result<Vec<Command>> {
+    let mut commands = vec![];
+    loop {
+        let result = ciborium::from_reader::<Command, _>(&mut stream);
+        match result {
+            Ok(result) => commands.push(result),
+            Err(ciborium::de::Error::Io(e))
+                if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::UnexpectedEof =>
+            {
+                break;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(commands)
+}
+
+pub fn write_command(mut stream: impl Write, command: &Command) -> anyhow::Result<()> {
+    ciborium::ser::into_writer(command, &mut stream)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -7,8 +39,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn roundtrip() {
+        let mut buf = vec![];
+        let commands = vec![
+            Command::EstablishRole(Role::Hoop { x: 1.0 }),
+            Command::EstablishRole(Role::Hoop { x: 2.0 }),
+        ];
+        for command in &commands {
+            write_command(&mut buf, command).expect("write_command");
+        }
+        let result = read_commands(&*buf).expect("read_commands");
+        assert_eq!(commands, result);
     }
 }
