@@ -1,5 +1,11 @@
+use std::io::Read;
+
 use clap::Parser;
-use tokio::net::TcpListener;
+use nope_the_hoop_proto::{read_commands, write_command, Command, Role};
+use tokio::{
+    io::AsyncWriteExt,
+    net::{tcp::ReadHalf, TcpListener, TcpStream},
+};
 use tracing::info;
 
 #[derive(Parser)]
@@ -28,11 +34,34 @@ async fn main() {
     info!("Listening on {}", listener.local_addr().unwrap());
 
     loop {
-        let (_socket, addr) = listener.accept().await.unwrap();
+        let (mut stream, addr) = listener.accept().await.unwrap();
         // A new task is spawned for each inbound socket. The socket is
         // moved to the new task and processed there.
         tokio::spawn(async move {
             info!("Accepted connection from {}", addr);
+            match process(&mut stream).await {
+                Ok(_) => info!("Connection from {} ended successfully", addr),
+                Err(e) => info!("Connection from {} failed: {}", addr, e),
+            }
         });
+    }
+}
+
+struct ReadWrap<'a>(ReadHalf<'a>);
+
+impl Read for ReadWrap<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.try_read(buf)
+    }
+}
+
+async fn process(stream: &mut TcpStream) -> anyhow::Result<()> {
+    let (read, mut write) = stream.split();
+    let mut read = ReadWrap(read);
+    let mut buf = vec![];
+    write_command(&mut buf, &Command::EstablishRole(Role::Hoop { x: 100. }))?;
+    write.write(&buf).await?;
+    loop {
+        let _commands = read_commands(&mut read);
     }
 }
