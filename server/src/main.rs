@@ -3,7 +3,7 @@ use std::io::Read;
 use clap::Parser;
 use nope_the_hoop_proto::{read_messages, write_message, Message, Role};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncWriteExt, Interest},
     net::{tcp::ReadHalf, TcpListener, TcpStream},
 };
 use tracing::info;
@@ -26,7 +26,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    let _guard = tracing::subscriber::set_default(tracing_subscriber::fmt::Subscriber::new());
+    let _guard =
+        tracing::subscriber::set_global_default(tracing_subscriber::fmt::Subscriber::new());
     let args = Args::parse();
     let listener = TcpListener::bind(&format!("{}:{}", args.bind_address, args.port))
         .await
@@ -62,6 +63,7 @@ async fn process(stream: &mut TcpStream) -> anyhow::Result<()> {
     write_message(&mut buf, &Message::EstablishRole(Role::Hoop { x: 100. }))?;
     write.write(&buf).await?;
     loop {
+        read.0.ready(Interest::READABLE).await?;
         let _client_messages = read_messages(&mut read);
     }
 }
