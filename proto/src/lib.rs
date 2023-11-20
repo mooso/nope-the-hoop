@@ -12,15 +12,22 @@ pub enum Command {
     EstablishRole(Role),
 }
 
+fn should_break(io_error_kind: ErrorKind) -> bool {
+    match io_error_kind {
+        ErrorKind::WouldBlock => true,
+        #[cfg(test)]
+        ErrorKind::UnexpectedEof => true,
+        _ => false,
+    }
+}
+
 pub fn read_commands(mut stream: impl Read) -> anyhow::Result<Vec<Command>> {
     let mut commands = vec![];
     loop {
         let result = ciborium::from_reader::<Command, _>(&mut stream);
         match result {
             Ok(result) => commands.push(result),
-            Err(ciborium::de::Error::Io(e))
-                if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::UnexpectedEof =>
-            {
+            Err(ciborium::de::Error::Io(e)) if should_break(e.kind()) => {
                 break;
             }
             Err(e) => return Err(e.into()),
