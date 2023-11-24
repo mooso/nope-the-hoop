@@ -1,10 +1,15 @@
 use std::io::Read;
 
 use clap::Parser;
-use nope_the_hoop_proto::{read_messages_as_server, write_message, Role, ToClientMessage};
+use nope_the_hoop_proto::{
+    read_messages_as_server, write_message, HorizontalDirection, ToClientMessage, ToServerMessage,
+};
 use tokio::{
     io::{AsyncWriteExt, Interest},
-    net::{tcp::ReadHalf, TcpListener, TcpStream},
+    net::{
+        tcp::{ReadHalf, WriteHalf},
+        TcpListener, TcpStream,
+    },
 };
 use tracing::info;
 
@@ -56,17 +61,44 @@ impl Read for ReadWrap<'_> {
     }
 }
 
+const INITIAL_HOOP_X: f32 = 100.;
+const HOOP_MIN_X: f32 = 0.;
+const HOOP_MAX_X: f32 = 200.;
+const HOOOP_SPEED: f32 = 100.;
+
 async fn process(stream: &mut TcpStream) -> anyhow::Result<()> {
     let (read, mut write) = stream.split();
     let mut read = ReadWrap(read);
-    let mut buf = vec![];
-    write_message(
-        &mut buf,
-        &ToClientMessage::EstablishRole(Role::Hoop { x: 100. }),
-    )?;
-    write.write_all(&buf).await?;
+    let mut hoop_x = INITIAL_HOOP_X;
+    write_to_client(&mut write, &ToClientMessage::EstablishAsHoop { x: hoop_x }).await?;
     loop {
         read.0.ready(Interest::READABLE).await?;
-        let _client_messages = read_messages_as_server(&mut read);
+        let client_messages = read_messages_as_server(&mut read)?;
+        for message in client_messages {
+            match message {
+                ToServerMessage::MoveHoop {
+                    direction,
+                    seconds_pressed,
+                } => {
+                    let sign = match direction {
+                        HorizontalDirection::Left => -1.,
+                        HorizontalDirection::Right => 1.,
+                    };
+                    let delta_x = sign * HOOOP_SPEED * seconds_pressed;
+                    hoop_x = (hoop_x + delta_x).clamp(HOOP_MIN_X, HOOP_MAX_X);
+                    write_to_client(&mut write, &ToClientMessage::MoveHoop { x: hoop_x }).await?;
+                }
+            }
+        }
     }
+}
+
+async fn write_to_client(
+    write: &mut WriteHalf<'_>,
+    command: &ToClientMessage,
+) -> anyhow::Result<()> {
+    let mut buf = vec![];
+    write_message(&mut buf, command)?;
+    write.write_all(&buf).await?;
+    Ok(())
 }

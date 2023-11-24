@@ -3,19 +3,23 @@ use std::io::{ErrorKind, Read, Write};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub enum Role {
-    Hoop { x: f32 },
+pub enum HorizontalDirection {
+    Left,
+    Right,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum ToClientMessage {
-    EstablishRole(Role),
+    EstablishAsHoop { x: f32 },
     MoveHoop { x: f32 },
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum ToServerMessage {
-    MoveHoop { x: f32 },
+    MoveHoop {
+        direction: HorizontalDirection,
+        seconds_pressed: f32,
+    },
 }
 
 fn should_break(io_error_kind: ErrorKind) -> bool {
@@ -63,8 +67,8 @@ mod tests {
     fn roundtrip() {
         let mut buf = vec![];
         let messages = vec![
-            ToClientMessage::EstablishRole(Role::Hoop { x: 1.0 }),
-            ToClientMessage::EstablishRole(Role::Hoop { x: 2.0 }),
+            ToClientMessage::EstablishAsHoop { x: 1.0 },
+            ToClientMessage::EstablishAsHoop { x: 2.0 },
         ];
         for message in &messages {
             write_message(&mut buf, message).expect("write_command");
