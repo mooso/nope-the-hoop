@@ -64,7 +64,7 @@ async fn process(stream: &mut TcpStream) -> anyhow::Result<()> {
         &mut buf,
         &ToClientMessage::EstablishRole(Role::Hoop { x: 100. }),
     )?;
-    write.write(&buf).await?;
+    write.write_all(&buf).await?;
     loop {
         read.0.ready(Interest::READABLE).await?;
         let _client_messages = read_messages_as_server(&mut read);
