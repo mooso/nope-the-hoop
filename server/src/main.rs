@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use clap::Parser;
-use nope_the_hoop_proto::{read_messages, write_message, Message, Role};
+use nope_the_hoop_proto::{read_messages_as_server, write_message, Role, ToClientMessage};
 use tokio::{
     io::{AsyncWriteExt, Interest},
     net::{tcp::ReadHalf, TcpListener, TcpStream},
@@ -60,10 +60,13 @@ async fn process(stream: &mut TcpStream) -> anyhow::Result<()> {
     let (read, mut write) = stream.split();
     let mut read = ReadWrap(read);
     let mut buf = vec![];
-    write_message(&mut buf, &Message::EstablishRole(Role::Hoop { x: 100. }))?;
+    write_message(
+        &mut buf,
+        &ToClientMessage::EstablishRole(Role::Hoop { x: 100. }),
+    )?;
     write.write(&buf).await?;
     loop {
         read.0.ready(Interest::READABLE).await?;
-        let _client_messages = read_messages(&mut read);
+        let _client_messages = read_messages_as_server(&mut read);
     }
 }
