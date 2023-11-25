@@ -32,13 +32,19 @@ fn should_break(io_error_kind: ErrorKind) -> bool {
     }
 }
 
+const FRAME_SIZE: usize = 64;
+
 fn read_messages<T: DeserializeOwned>(mut stream: impl Read) -> anyhow::Result<Vec<T>> {
+    let mut buf = [0; FRAME_SIZE];
     let mut commands = vec![];
     loop {
-        let result = ciborium::from_reader::<T, _>(&mut stream);
+        let result = stream.read_exact(&mut buf);
         match result {
-            Ok(result) => commands.push(result),
-            Err(ciborium::de::Error::Io(e)) if should_break(e.kind()) => {
+            Ok(()) => {
+                let command = ciborium::from_reader::<T, _>(&buf[..])?;
+                commands.push(command);
+            }
+            Err(e) if should_break(e.kind()) => {
                 break;
             }
             Err(e) => return Err(e.into()),
@@ -56,7 +62,9 @@ pub fn read_messages_as_server(mut stream: impl Read) -> anyhow::Result<Vec<ToSe
 }
 
 pub fn write_message(mut stream: impl Write, command: &impl Serialize) -> anyhow::Result<()> {
-    ciborium::ser::into_writer(command, &mut stream).context("Failed to write message")?;
+    let mut buf = [0_u8; FRAME_SIZE];
+    ciborium::ser::into_writer(command, &mut buf[..]).context("Failed to serialize message")?;
+    stream.write_all(&buf).context("Failed to write message")?;
     stream.flush().context("Failed to flush stream")?;
     Ok(())
 }
