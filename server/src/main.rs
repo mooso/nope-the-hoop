@@ -47,7 +47,7 @@ async fn main() {
             info!("Accepted connection from {}", addr);
             match process(&mut stream).await {
                 Ok(_) => info!("Connection from {} ended successfully", addr),
-                Err(e) => info!("Connection from {} failed: {}", addr, e),
+                Err(e) => info!("Connection from {} failed: {:#}", addr, e),
             }
         });
     }

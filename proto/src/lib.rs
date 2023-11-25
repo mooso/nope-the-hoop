@@ -1,5 +1,6 @@
 use std::io::{ErrorKind, Read, Write};
 
+use anyhow::Context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -47,15 +48,16 @@ fn read_messages<T: DeserializeOwned>(mut stream: impl Read) -> anyhow::Result<V
 }
 
 pub fn read_messages_as_client(mut stream: impl Read) -> anyhow::Result<Vec<ToClientMessage>> {
-    read_messages(&mut stream)
+    read_messages(&mut stream).context("Failed to read messages from server")
 }
 
 pub fn read_messages_as_server(mut stream: impl Read) -> anyhow::Result<Vec<ToServerMessage>> {
-    read_messages(&mut stream)
+    read_messages(&mut stream).context("Failed to read messages from client")
 }
 
 pub fn write_message(mut stream: impl Write, command: &impl Serialize) -> anyhow::Result<()> {
-    ciborium::ser::into_writer(command, &mut stream)?;
+    ciborium::ser::into_writer(command, &mut stream).context("Failed to write message")?;
+    stream.flush().context("Failed to flush stream")?;
     Ok(())
 }
 

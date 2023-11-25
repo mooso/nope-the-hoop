@@ -49,7 +49,7 @@ impl<R, E: Display> HandleErrors for Result<R, E> {
         match self {
             Ok(r) => r,
             Err(e) => {
-                error!("Fatal error: {e}");
+                error!("Fatal error: {e:#}");
                 std::process::exit(1);
             }
         }
