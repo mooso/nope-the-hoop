@@ -3,7 +3,9 @@ use std::{fmt::Display, net::TcpStream};
 use bevy::{prelude::*, sprite::MaterialMesh2dBundle};
 use clap::Parser;
 use nope_the_hoop_proto::{
-    read_messages_as_client, write_message, HorizontalDirection, ToClientMessage, ToServerMessage,
+    read_messages_as_client,
+    state::{GameState, UpdateState},
+    write_message, HorizontalDirection, ToClientMessage, ToServerMessage,
 };
 
 #[derive(Parser)]
@@ -68,7 +70,9 @@ fn setup_connect(mut commands: Commands) {
     let args = Args::parse();
     info!("Connecting to {}:{}", args.server, args.port);
     let stream = establish_connection(&args).handle();
-    commands.insert_resource(ServerConnection(stream));
+    let mut connection = ServerConnection(stream);
+    send_hello(&mut connection);
+    commands.insert_resource(connection);
     info!("Connected");
 }
 
@@ -91,22 +95,25 @@ fn update_from_server(
     let messages = read_messages_as_client(&mut server.0).handle();
     for message in messages {
         match message {
-            ToClientMessage::EstablishAsHoop { x } => {
+            ToClientMessage::EstablishAsHoop => {
+                trace!("I'm a hoop");
                 current_role.0 = Role::Hoop;
+            }
+            ToClientMessage::UpdateState(UpdateState::MoveHoop { x }) => {
+                hoops.single_mut().1.translation.x = x;
+            }
+            ToClientMessage::InitialState(GameState { hoop_x }) => {
                 commands.spawn((
                     MaterialMesh2dBundle {
                         mesh: meshes
                             .add(shape::Quad::new(Vec2::new(50., 10.)).into())
                             .into(),
                         material: materials.add(ColorMaterial::from(Color::GRAY)),
-                        transform: Transform::from_translation(Vec3::new(x, 0., 0.)),
+                        transform: Transform::from_translation(Vec3::new(hoop_x, 0., 0.)),
                         ..default()
                     },
                     Hoop,
                 ));
-            }
-            ToClientMessage::MoveHoop { x } => {
-                hoops.single_mut().1.translation.x = x;
             }
         }
     }
@@ -146,4 +153,8 @@ fn send_hoop_movement(server: &mut ServerConnection, direction: HorizontalDirect
         },
     )
     .handle();
+}
+
+fn send_hello(server: &mut ServerConnection) {
+    write_message(&mut server.0, &ToServerMessage::Hello { game_id: 123 }).handle();
 }

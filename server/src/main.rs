@@ -1,17 +1,16 @@
-use std::io::Read;
+use std::{collections::HashMap, time::Duration};
 
+use anyhow::Context;
 use clap::Parser;
-use nope_the_hoop_proto::{
-    read_messages_as_server, write_message, HorizontalDirection, ToClientMessage, ToServerMessage,
-};
-use tokio::{
-    io::{AsyncWriteExt, Interest},
-    net::{
-        tcp::{ReadHalf, WriteHalf},
-        TcpListener, TcpStream,
-    },
-};
+use futures::future::select_all;
+use nope_the_hoop_proto::{read_messages_as_server, ToServerMessage};
+use tokio::net::TcpListener;
 use tracing::info;
+
+use crate::host::GameHost;
+
+mod host;
+mod sync_read;
 
 #[derive(Parser)]
 #[command(
@@ -38,67 +37,52 @@ async fn main() {
         .await
         .unwrap();
     info!("Listening on {}", listener.local_addr().unwrap());
+    let mut games: HashMap<u32, GameHost> = HashMap::new();
 
     loop {
-        let (mut stream, addr) = listener.accept().await.unwrap();
-        // A new task is spawned for each inbound socket. The socket is
-        // moved to the new task and processed there.
-        tokio::spawn(async move {
-            info!("Accepted connection from {}", addr);
-            match process(&mut stream).await {
-                Ok(_) => info!("Connection from {} ended successfully", addr),
-                Err(e) => info!("Connection from {} failed: {:#}", addr, e),
+        tokio::select! {
+            result = listener.accept() => {
+                let (stream, addr) = result.expect("Accepting connection");
+                info!("Accepted connection from {}", addr);
+                let (read, write) = stream.into_split();
+                let mut read = sync_read::wrap(read);
+                let game_id = match process_hello(&mut read).await {
+                    Ok(game_id) => game_id,
+                    Err(e) => {
+                        info!("Connection from {} failed on hello: {:#}", addr, e);
+                        return;
+                    }
+                };
+                let game = games.entry(game_id).or_insert_with(|| GameHost::new(game_id));
+                game.new_client(read, write).await;
             }
-        });
-    }
-}
-
-struct ReadWrap<'a>(ReadHalf<'a>);
-
-impl Read for ReadWrap<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.0.try_read(buf)
-    }
-}
-
-const INITIAL_HOOP_X: f32 = 100.;
-const HOOP_MIN_X: f32 = 0.;
-const HOOP_MAX_X: f32 = 200.;
-const HOOOP_SPEED: f32 = 100.;
-
-async fn process(stream: &mut TcpStream) -> anyhow::Result<()> {
-    let (read, mut write) = stream.split();
-    let mut read = ReadWrap(read);
-    let mut hoop_x = INITIAL_HOOP_X;
-    write_to_client(&mut write, &ToClientMessage::EstablishAsHoop { x: hoop_x }).await?;
-    loop {
-        read.0.ready(Interest::READABLE).await?;
-        let client_messages = read_messages_as_server(&mut read)?;
-        for message in client_messages {
-            match message {
-                ToServerMessage::MoveHoop {
-                    direction,
-                    seconds_pressed,
-                } => {
-                    let sign = match direction {
-                        HorizontalDirection::Left => -1.,
-                        HorizontalDirection::Right => 1.,
-                    };
-                    let delta_x = sign * HOOOP_SPEED * seconds_pressed;
-                    hoop_x = (hoop_x + delta_x).clamp(HOOP_MIN_X, HOOP_MAX_X);
-                    write_to_client(&mut write, &ToClientMessage::MoveHoop { x: hoop_x }).await?;
-                }
+            ended_game = await_game_end(&mut games) => {
+                games.remove(&ended_game);
             }
         }
     }
 }
 
-async fn write_to_client(
-    write: &mut WriteHalf<'_>,
-    command: &ToClientMessage,
-) -> anyhow::Result<()> {
-    let mut buf = vec![];
-    write_message(&mut buf, command)?;
-    write.write_all(&buf).await?;
-    Ok(())
+async fn await_game_end(games: &mut HashMap<u32, GameHost>) -> u32 {
+    if games.is_empty() {
+        let () = futures::future::pending().await;
+        unreachable!()
+    }
+    let (ended_game, _, _) =
+        select_all(games.values_mut().map(|game| Box::pin(game.await_end()))).await;
+    ended_game
+}
+
+async fn process_hello(read: &mut sync_read::ReadWrap) -> anyhow::Result<u32> {
+    tokio::time::timeout(Duration::from_millis(500), read.await_ready())
+        .await
+        .context("Timed out on receiving hello")??;
+    let client_messages = read_messages_as_server(read)?;
+    if client_messages.len() != 1 {
+        anyhow::bail!("Expected exactly one Hello from client");
+    }
+    let ToServerMessage::Hello { game_id } = client_messages[0] else {
+        anyhow::bail!("Expected Hello from client - got: {:?}", client_messages[0]);
+    };
+    Ok(game_id)
 }

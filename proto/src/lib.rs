@@ -3,6 +3,8 @@ use std::io::{ErrorKind, Read, Write};
 use anyhow::Context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+pub mod state;
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum HorizontalDirection {
     Left,
@@ -11,12 +13,16 @@ pub enum HorizontalDirection {
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum ToClientMessage {
-    EstablishAsHoop { x: f32 },
-    MoveHoop { x: f32 },
+    InitialState(state::GameState),
+    EstablishAsHoop,
+    UpdateState(state::UpdateState),
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum ToServerMessage {
+    Hello {
+        game_id: u32,
+    },
     MoveHoop {
         direction: HorizontalDirection,
         seconds_pressed: f32,
@@ -77,8 +83,8 @@ mod tests {
     fn roundtrip() {
         let mut buf = vec![];
         let messages = vec![
-            ToClientMessage::EstablishAsHoop { x: 1.0 },
-            ToClientMessage::EstablishAsHoop { x: 2.0 },
+            ToClientMessage::EstablishAsHoop,
+            ToClientMessage::UpdateState(state::UpdateState::MoveHoop { x: 2.0 }),
         ];
         for message in &messages {
             write_message(&mut buf, message).expect("write_command");
