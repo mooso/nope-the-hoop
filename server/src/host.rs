@@ -1,14 +1,17 @@
-use anyhow::Context;
-use futures::future::select_all;
+use anyhow::{anyhow, Context};
+use futures::{future::select_all, StreamExt};
 use nope_the_hoop_proto::{
-    read_messages_as_server,
+    message::{HorizontalDirection, ToClientMessage, ToServerMessage},
     state::{GameState, UpdateState},
-    write_message, HorizontalDirection, ToClientMessage, ToServerMessage,
+    stream::{write_message, MessageStream},
 };
-use tokio::{io::AsyncWriteExt, net::tcp::OwnedWriteHalf, sync::mpsc};
+use tokio::{
+    net::tcp::{OwnedReadHalf, OwnedWriteHalf},
+    sync::mpsc,
+};
 use tracing::{error, info, trace};
 
-use crate::sync_read::ReadWrap;
+pub(crate) type ServerMessageStream = MessageStream<OwnedReadHalf, ToServerMessage>;
 
 const INITIAL_HOOP_X: f32 = 100.;
 const HOOP_MIN_X: f32 = 0.;
@@ -16,7 +19,7 @@ const HOOP_MAX_X: f32 = 200.;
 const HOOOP_SPEED: f32 = 100.;
 
 pub struct GameHost {
-    connection_tx: mpsc::Sender<(ReadWrap, OwnedWriteHalf)>,
+    connection_tx: mpsc::Sender<(ServerMessageStream, OwnedWriteHalf)>,
     end_rx: mpsc::Receiver<u32>,
 }
 
@@ -42,7 +45,7 @@ impl GameHost {
         self.end_rx.recv().await.expect("Awaiting end of game")
     }
 
-    pub async fn new_client(&self, read_wrap: ReadWrap, write: OwnedWriteHalf) {
+    pub async fn new_client(&self, read_wrap: ServerMessageStream, write: OwnedWriteHalf) {
         self.connection_tx
             .send((read_wrap, write))
             .await
@@ -51,36 +54,29 @@ impl GameHost {
 }
 
 struct Client {
-    read: ReadWrap,
+    read: ServerMessageStream,
     write: OwnedWriteHalf,
-}
-
-impl Client {
-    async fn read_ready(&self) -> tokio::io::Result<()> {
-        self.read.await_ready().await
-    }
 }
 
 async fn read_one_client_message(
     clients: &mut [Client],
-) -> (usize, anyhow::Result<Vec<ToServerMessage>>) {
+) -> (usize, anyhow::Result<ToServerMessage>) {
     if clients.is_empty() {
         let () = futures::future::pending().await;
         unreachable!()
     }
-    let (result, client_index, _) =
-        select_all(clients.iter().map(|client| Box::pin(client.read_ready()))).await;
-    (
-        client_index,
-        match result {
-            Ok(()) => read_messages_as_server(&mut clients[client_index].read),
-            Err(e) => Err(e.into()),
-        },
+    let (result, client_index, _) = select_all(
+        clients
+            .iter_mut()
+            .map(|client| Box::pin(client.read.next())),
     )
+    .await;
+    let result = result.unwrap_or(Err(anyhow!("Client closed connection")));
+    (client_index, result)
 }
 
 async fn game_loop(
-    mut connection_rx: mpsc::Receiver<(ReadWrap, OwnedWriteHalf)>,
+    mut connection_rx: mpsc::Receiver<(ServerMessageStream, OwnedWriteHalf)>,
     id: u32,
 ) -> anyhow::Result<()> {
     let mut game = GameState {
@@ -92,42 +88,40 @@ async fn game_loop(
         tokio::select! {
             new_connection = connection_rx.recv() => {
                 let (read, mut write) = new_connection.context("Failed to receive connection")?;
-                write_to_client(&mut write, &ToClientMessage::InitialState(game.clone())).await?;
+                write_message(&mut write, &ToClientMessage::InitialState(game.clone())).await?;
                 let mut client = Client { read, write };
                 if clients.is_empty() {
                     info!("Game {} has its first client", id);
-                    write_to_client(&mut client.write, &ToClientMessage::EstablishAsHoop).await?;
+                    write_message(&mut client.write, &ToClientMessage::EstablishAsHoop).await?;
                 }
                 clients.push(client);
             }
             (client_index, result) = read_one_client_message(&mut clients) => {
-                let messages = match result {
-                    Ok(messages) => messages,
+                let message = match result {
+                    Ok(message) => message,
                     Err(e) => {
                         info!("Client {} in game {id} read error (terminating): {:#}", client_index, e);
                         _ = clients.remove(client_index);
                         continue;
                     }
                 };
-                for message in messages {
-                    match message {
-                        ToServerMessage::MoveHoop {
-                            direction,
-                            seconds_pressed,
-                        } => {
-                            trace!("Client {} in game {id} moved hoop: {:?}", client_index, direction);
-                            let sign = match direction {
-                                HorizontalDirection::Left => -1.,
-                                HorizontalDirection::Right => 1.,
-                            };
-                            let delta_x = sign * HOOOP_SPEED * seconds_pressed;
-                            game.hoop_x = (game.hoop_x + delta_x).clamp(HOOP_MIN_X, HOOP_MAX_X);
-                            updates.push(ToClientMessage::UpdateState(UpdateState::MoveHoop { x: game.hoop_x }));
-                        }
-                        ToServerMessage::Hello { .. } => {
-                            error!("Client {} in game {id} sent Hello after initial hello - terminating", client_index);
-                            _ = clients.remove(client_index);
-                        }
+                match message {
+                    ToServerMessage::MoveHoop {
+                        direction,
+                        seconds_pressed,
+                    } => {
+                        trace!("Client {} in game {id} moved hoop: {:?}", client_index, direction);
+                        let sign = match direction {
+                            HorizontalDirection::Left => -1.,
+                            HorizontalDirection::Right => 1.,
+                        };
+                        let delta_x = sign * HOOOP_SPEED * seconds_pressed;
+                        game.hoop_x = (game.hoop_x + delta_x).clamp(HOOP_MIN_X, HOOP_MAX_X);
+                        updates.push(ToClientMessage::UpdateState(UpdateState::MoveHoop { x: game.hoop_x }));
+                    }
+                    ToServerMessage::Hello { .. } => {
+                        error!("Client {} in game {id} sent Hello after initial hello - terminating", client_index);
+                        _ = clients.remove(client_index);
                     }
                 }
             }
@@ -136,18 +130,8 @@ async fn game_loop(
             // TODO: Update concurrently, and don't let a slow client slow everyone down
             for client in &mut clients {
                 trace!("Sending update to client: {update:?}");
-                write_to_client(&mut client.write, &update).await?;
+                write_message(&mut client.write, &update).await?;
             }
         }
     }
-}
-
-async fn write_to_client(
-    write: &mut OwnedWriteHalf,
-    command: &ToClientMessage,
-) -> anyhow::Result<()> {
-    let mut buf = vec![];
-    write_message(&mut buf, command)?;
-    write.write_all(&buf).await?;
-    Ok(())
 }

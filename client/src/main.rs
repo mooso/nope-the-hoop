@@ -3,9 +3,9 @@ use std::{fmt::Display, net::TcpStream};
 use bevy::{prelude::*, sprite::MaterialMesh2dBundle};
 use clap::Parser;
 use nope_the_hoop_proto::{
-    read_messages_as_client,
+    message::{HorizontalDirection, ToClientMessage, ToServerMessage},
     state::{GameState, UpdateState},
-    write_message, HorizontalDirection, ToClientMessage, ToServerMessage,
+    sync::MessageStream,
 };
 
 #[derive(Parser)]
@@ -33,7 +33,7 @@ enum Role {
 struct Hoop;
 
 #[derive(Resource)]
-struct ServerConnection(TcpStream);
+struct ServerConnection(MessageStream<TcpStream>);
 
 #[derive(Resource)]
 struct CurrentRole(Role);
@@ -92,7 +92,7 @@ fn update_from_server(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut hoops: Query<(&Hoop, &mut Transform)>,
 ) {
-    let messages = read_messages_as_client(&mut server.0).handle();
+    let messages = server.0.read_messages::<ToClientMessage>().handle();
     for message in messages {
         match message {
             ToClientMessage::EstablishAsHoop => {
@@ -138,23 +138,25 @@ fn handle_input(
     }
 }
 
-fn establish_connection(args: &Args) -> anyhow::Result<TcpStream> {
+fn establish_connection(args: &Args) -> anyhow::Result<MessageStream<TcpStream>> {
     let stream = TcpStream::connect((args.server.as_str(), args.port))?;
     stream.set_nonblocking(true)?;
-    Ok(stream)
+    Ok(MessageStream::new(stream))
 }
 
 fn send_hoop_movement(server: &mut ServerConnection, direction: HorizontalDirection, time: &Time) {
-    write_message(
-        &mut server.0,
-        &ToServerMessage::MoveHoop {
+    server
+        .0
+        .write_message(&ToServerMessage::MoveHoop {
             direction,
             seconds_pressed: time.delta_seconds(),
-        },
-    )
-    .handle();
+        })
+        .handle();
 }
 
 fn send_hello(server: &mut ServerConnection) {
-    write_message(&mut server.0, &ToServerMessage::Hello { game_id: 123 }).handle();
+    server
+        .0
+        .write_message(&ToServerMessage::Hello { game_id: 123 })
+        .handle();
 }

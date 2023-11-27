@@ -2,15 +2,15 @@ use std::{collections::HashMap, time::Duration};
 
 use anyhow::Context;
 use clap::Parser;
-use futures::future::select_all;
-use nope_the_hoop_proto::{read_messages_as_server, ToServerMessage};
+use futures::{future::select_all, StreamExt};
+use host::ServerMessageStream;
+use nope_the_hoop_proto::{message::ToServerMessage, stream::MessageStream};
 use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::host::GameHost;
 
 mod host;
-mod sync_read;
 
 #[derive(Parser)]
 #[command(
@@ -45,7 +45,7 @@ async fn main() {
                 let (stream, addr) = result.expect("Accepting connection");
                 info!("Accepted connection from {}", addr);
                 let (read, write) = stream.into_split();
-                let mut read = sync_read::wrap(read);
+                let mut read = MessageStream::new(read);
                 let game_id = match process_hello(&mut read).await {
                     Ok(game_id) => game_id,
                     Err(e) => {
@@ -73,16 +73,16 @@ async fn await_game_end(games: &mut HashMap<u32, GameHost>) -> u32 {
     ended_game
 }
 
-async fn process_hello(read: &mut sync_read::ReadWrap) -> anyhow::Result<u32> {
-    tokio::time::timeout(Duration::from_millis(500), read.await_ready())
+async fn process_hello(read: &mut ServerMessageStream) -> anyhow::Result<u32> {
+    let result = tokio::time::timeout(Duration::from_millis(500), read.next())
         .await
-        .context("Timed out on receiving hello")??;
-    let client_messages = read_messages_as_server(read)?;
-    if client_messages.len() != 1 {
-        anyhow::bail!("Expected exactly one Hello from client");
-    }
-    let ToServerMessage::Hello { game_id } = client_messages[0] else {
-        anyhow::bail!("Expected Hello from client - got: {:?}", client_messages[0]);
+        .context("Timed out on receiving hello")?;
+    let Some(result) = result else {
+        anyhow::bail!("Client closed connection before hello");
+    };
+    let client_message = result.context("Failed to read hello")?;
+    let ToServerMessage::Hello { game_id } = client_message else {
+        anyhow::bail!("Expected Hello from client - got: {:?}", client_message);
     };
     Ok(game_id)
 }

@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.75"
 clap = { version = "4.4.8", features = ["derive"] }
 futures = "0.3"
-nope-the-hoop-proto = { version = "0.0.0", path = "../proto" }
+nope-the-hoop-proto = { version = "0.0.0", path = "../proto", features = ["async"] }
 tokio = { version = "1.34.0", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
