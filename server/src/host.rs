@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context};
 use futures::{future::select_all, StreamExt};
 use nope_the_hoop_proto::{
     message::{HorizontalDirection, ToClientMessage, ToServerMessage},
-    state::{GameState, UpdateState},
+    state::{GameState, Point, UpdateState},
     stream::{write_message, MessageStream},
 };
 use tokio::{
@@ -17,6 +17,7 @@ const INITIAL_HOOP_X: f32 = 100.;
 const HOOP_MIN_X: f32 = 0.;
 const HOOP_MAX_X: f32 = 200.;
 const HOOOP_SPEED: f32 = 100.;
+const SINGLE_BALL_POSITION: Point = Point { x: -100., y: 10. };
 
 pub struct GameHost {
     connection_tx: mpsc::Sender<(ServerMessageStream, OwnedWriteHalf)>,
@@ -81,6 +82,7 @@ async fn game_loop(
 ) -> anyhow::Result<()> {
     let mut game = GameState {
         hoop_x: INITIAL_HOOP_X,
+        ball_positions: vec![SINGLE_BALL_POSITION],
     };
     let mut clients: Vec<Client> = vec![];
     loop {

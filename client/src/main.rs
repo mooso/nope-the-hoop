@@ -1,10 +1,13 @@
 use std::{fmt::Display, net::TcpStream};
 
-use bevy::{prelude::*, sprite::MaterialMesh2dBundle};
+use bevy::{
+    prelude::*,
+    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
+};
 use clap::Parser;
 use nope_the_hoop_proto::{
     message::{HorizontalDirection, ToClientMessage, ToServerMessage},
-    state::{GameState, UpdateState},
+    state::{GameState, Point, UpdateState},
     sync::MessageStream,
 };
 
@@ -32,11 +35,22 @@ enum Role {
 #[derive(Component)]
 struct Hoop;
 
+#[derive(Component)]
+struct Ball;
+
 #[derive(Resource)]
 struct ServerConnection(MessageStream<TcpStream>);
 
 #[derive(Resource)]
 struct CurrentRole(Role);
+
+#[derive(Resource)]
+struct AssetHandles {
+    hoop_mesh: Mesh2dHandle,
+    hoop_material: Handle<ColorMaterial>,
+    ball_mesh: Mesh2dHandle,
+    ball_material: Handle<ColorMaterial>,
+}
 
 trait HandleErrors {
     type Output;
@@ -61,7 +75,10 @@ impl<R, E: Display> HandleErrors for Result<R, E> {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, (setup_connect, setup_view, setup_role))
+        .add_systems(
+            Startup,
+            (setup_connect, setup_view, setup_role, setup_assets),
+        )
         .add_systems(Update, (update_from_server, handle_input))
         .run();
 }
@@ -84,12 +101,38 @@ fn setup_role(mut commands: Commands) {
     commands.insert_resource(CurrentRole(Role::Unknown));
 }
 
+fn setup_assets(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let hoop_material = materials.add(ColorMaterial::from(Color::GRAY));
+    let hoop_mesh = meshes
+        .add(shape::Quad::new(Vec2::new(50., 10.)).into())
+        .into();
+    let ball_material = materials.add(ColorMaterial::from(Color::RED));
+    let ball_mesh = meshes
+        .add(
+            shape::Circle {
+                radius: 10.,
+                ..default()
+            }
+            .into(),
+        )
+        .into();
+    commands.insert_resource(AssetHandles {
+        hoop_mesh,
+        hoop_material,
+        ball_mesh,
+        ball_material,
+    });
+}
+
 fn update_from_server(
     mut commands: Commands,
     mut server: ResMut<ServerConnection>,
     mut current_role: ResMut<CurrentRole>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    asset_handles: Res<AssetHandles>,
     mut hoops: Query<(&Hoop, &mut Transform)>,
 ) {
     let messages = server.0.read_messages::<ToClientMessage>().handle();
@@ -102,21 +145,40 @@ fn update_from_server(
             ToClientMessage::UpdateState(UpdateState::MoveHoop { x }) => {
                 hoops.single_mut().1.translation.x = x;
             }
-            ToClientMessage::InitialState(GameState { hoop_x }) => {
+            ToClientMessage::UpdateState(UpdateState::AddBall { position }) => {
+                add_ball(&mut commands, position, &asset_handles);
+            }
+            ToClientMessage::InitialState(GameState {
+                hoop_x,
+                ball_positions,
+            }) => {
                 commands.spawn((
                     MaterialMesh2dBundle {
-                        mesh: meshes
-                            .add(shape::Quad::new(Vec2::new(50., 10.)).into())
-                            .into(),
-                        material: materials.add(ColorMaterial::from(Color::GRAY)),
+                        mesh: asset_handles.hoop_mesh.clone(),
+                        material: asset_handles.hoop_material.clone(),
                         transform: Transform::from_translation(Vec3::new(hoop_x, 0., 0.)),
                         ..default()
                     },
                     Hoop,
                 ));
+                for ball in ball_positions {
+                    add_ball(&mut commands, ball, &asset_handles);
+                }
             }
         }
     }
+}
+
+fn add_ball(commands: &mut Commands, position: Point, asset_handles: &AssetHandles) {
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: asset_handles.ball_mesh.clone(),
+            material: asset_handles.ball_material.clone(),
+            transform: Transform::from_translation(Vec3::new(position.x, position.y, 0.)),
+            ..default()
+        },
+        Ball,
+    ));
 }
 
 fn handle_input(
