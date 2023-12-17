@@ -95,6 +95,11 @@ async fn game_loop(
                 if clients.is_empty() {
                     info!("Game {} has its first client", id);
                     write_message(&mut client.write, &ToClientMessage::EstablishAsHoop).await?;
+                } else if clients.len() == 1 {
+                    info!("Game {} has its first ball", id);
+                    write_message(&mut client.write, &ToClientMessage::EstablishAsBall {
+                        origin: SINGLE_BALL_POSITION,
+                    }).await?;
                 }
                 clients.push(client);
             }

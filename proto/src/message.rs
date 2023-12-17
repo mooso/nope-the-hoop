@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::state;
+use crate::state::{self, Point};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum HorizontalDirection {
@@ -12,6 +12,7 @@ pub enum HorizontalDirection {
 pub enum ToClientMessage {
     InitialState(state::GameState),
     EstablishAsHoop,
+    EstablishAsBall { origin: Point },
     UpdateState(state::UpdateState),
 }
 
