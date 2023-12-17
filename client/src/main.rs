@@ -1,5 +1,8 @@
+mod ball;
+
 use std::{fmt::Display, net::TcpStream};
 
+use ball::add_ball;
 use bevy::{
     prelude::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
@@ -7,14 +10,9 @@ use bevy::{
 use clap::Parser;
 use nope_the_hoop_proto::{
     message::{HorizontalDirection, ToClientMessage, ToServerMessage},
-    state::{GameState, Point, UpdateState},
+    state::{GameState, UpdateState},
     sync::MessageStream,
 };
-
-const BALL_RADIUS: f32 = 10.;
-const GUIDE_MARGIN: f32 = 1.;
-const GUIDE_LENGTH: f32 = 20.;
-const GUIDE_SPEED: f32 = 10.;
 
 #[derive(Parser)]
 #[command(
@@ -41,12 +39,6 @@ enum Role {
 #[derive(Component)]
 struct Hoop;
 
-#[derive(Component)]
-struct Ball;
-
-#[derive(Resource)]
-struct ThrowAngle(f32);
-
 #[derive(Resource)]
 struct ServerConnection(MessageStream<TcpStream>);
 
@@ -57,8 +49,7 @@ struct CurrentRole(Role);
 struct AssetHandles {
     hoop_mesh: Mesh2dHandle,
     hoop_material: Handle<ColorMaterial>,
-    ball_mesh: Mesh2dHandle,
-    ball_material: Handle<ColorMaterial>,
+    ball_assets: ball::AssetHandles,
 }
 
 trait HandleErrors {
@@ -82,14 +73,15 @@ impl<R, E: Display> HandleErrors for Result<R, E> {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins)
         .add_systems(
             Startup,
             (setup_connect, setup_view, setup_role, setup_assets),
         )
-        .add_systems(Update, (update_from_server, handle_input, draw_guide))
-        .run();
+        .add_systems(Update, (update_from_server, handle_input));
+    ball::setup(&mut app);
+    app.run();
 }
 
 fn setup_connect(mut commands: Commands) {
@@ -108,7 +100,6 @@ fn setup_view(mut commands: Commands) {
 
 fn setup_role(mut commands: Commands) {
     commands.insert_resource(CurrentRole(Role::Unknown));
-    commands.insert_resource(ThrowAngle(0.));
 }
 
 fn setup_assets(
@@ -120,21 +111,11 @@ fn setup_assets(
     let hoop_mesh = meshes
         .add(shape::Quad::new(Vec2::new(50., 10.)).into())
         .into();
-    let ball_material = materials.add(ColorMaterial::from(Color::RED));
-    let ball_mesh = meshes
-        .add(
-            shape::Circle {
-                radius: BALL_RADIUS,
-                ..default()
-            }
-            .into(),
-        )
-        .into();
+    let ball_assets = ball::AssetHandles::create(&mut materials, &mut meshes);
     commands.insert_resource(AssetHandles {
         hoop_mesh,
         hoop_material,
-        ball_mesh,
-        ball_material,
+        ball_assets,
     });
 }
 
@@ -162,7 +143,7 @@ fn update_from_server(
                 hoops.single_mut().1.translation.x = x;
             }
             ToClientMessage::UpdateState(UpdateState::AddBall { position }) => {
-                add_ball(&mut commands, position, &asset_handles);
+                add_ball(&mut commands, position, &asset_handles.ball_assets);
             }
             ToClientMessage::InitialState(GameState {
                 hoop_x,
@@ -178,23 +159,11 @@ fn update_from_server(
                     Hoop,
                 ));
                 for ball in ball_positions {
-                    add_ball(&mut commands, ball, &asset_handles);
+                    add_ball(&mut commands, ball, &asset_handles.ball_assets);
                 }
             }
         }
     }
-}
-
-fn add_ball(commands: &mut Commands, position: Point, asset_handles: &AssetHandles) {
-    commands.spawn((
-        MaterialMesh2dBundle {
-            mesh: asset_handles.ball_mesh.clone(),
-            material: asset_handles.ball_material.clone(),
-            transform: Transform::from_translation(Vec3::new(position.x, position.y, 0.)),
-            ..default()
-        },
-        Ball,
-    ));
 }
 
 fn handle_input(
@@ -202,10 +171,8 @@ fn handle_input(
     current_role: Res<CurrentRole>,
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
-    mut throw_angle: ResMut<ThrowAngle>,
 ) {
     match current_role.0 {
-        Role::Unknown => {}
         Role::Hoop => {
             if keyboard_input.pressed(KeyCode::Left) {
                 send_hoop_movement(&mut server, HorizontalDirection::Left, &time);
@@ -214,27 +181,8 @@ fn handle_input(
                 send_hoop_movement(&mut server, HorizontalDirection::Right, &time);
             }
         }
-        Role::Ball { .. } => {
-            let mut factor = 0.;
-            if keyboard_input.pressed(KeyCode::Left) {
-                factor += 1.;
-            }
-            if keyboard_input.pressed(KeyCode::Right) {
-                factor -= 1.;
-            }
-            throw_angle.0 += GUIDE_SPEED * factor * time.delta_seconds();
-        }
+        _ => (),
     }
-}
-
-fn draw_guide(mut gizmos: Gizmos, current_role: Res<CurrentRole>, throw_angle: Res<ThrowAngle>) {
-    let Role::Ball { origin } = current_role.0 else {
-        return;
-    };
-    // Unit vector in the direction of the throw
-    let throw_direction = Vec2::new(throw_angle.0.cos(), throw_angle.0.sin());
-    let guide_start = origin + throw_direction * (BALL_RADIUS + GUIDE_MARGIN);
-    gizmos.ray_2d(guide_start, throw_direction * GUIDE_LENGTH, Color::WHITE);
 }
 
 fn establish_connection(args: &Args) -> anyhow::Result<MessageStream<TcpStream>> {
