@@ -4,7 +4,7 @@ use bevy::{
 };
 use nope_the_hoop_proto::message::{HorizontalDirection, ToServerMessage};
 
-use crate::{connection::ServerConnection, CurrentRole, HandleErrors, Role};
+use crate::{connection::ServerConnection, CurrentRole, Role};
 
 #[derive(Component)]
 pub struct Hoop;
@@ -67,11 +67,8 @@ fn handle_input(
 }
 
 fn send_hoop_movement(server: &mut ServerConnection, direction: HorizontalDirection, time: &Time) {
-    server
-        .0
-        .write_message(&ToServerMessage::MoveHoop {
-            direction,
-            seconds_pressed: time.delta_seconds(),
-        })
-        .handle();
+    server.send(ToServerMessage::MoveHoop {
+        direction,
+        seconds_pressed: time.delta_seconds(),
+    });
 }

@@ -60,27 +60,20 @@ impl<R, E: Display> HandleErrors for Result<R, E> {
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins)
-        .add_systems(Startup, (setup_view, setup_role, setup_assets));
+    app.add_plugins(DefaultPlugins).add_systems(Startup, setup);
     connection::setup(&mut app);
     ball::setup(&mut app);
     hoop::setup(&mut app);
     app.run();
 }
 
-fn setup_view(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
-}
-
-fn setup_role(mut commands: Commands) {
-    commands.insert_resource(CurrentRole(Role::Unknown));
-}
-
-fn setup_assets(
+fn setup(
     mut commands: Commands,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
+    commands.spawn(Camera2dBundle::default());
+    commands.insert_resource(CurrentRole(Role::Unknown));
     let hoop_assets = hoop::AssetHandles::create(&mut materials, &mut meshes);
     let ball_assets = ball::AssetHandles::create(&mut materials, &mut meshes);
     commands.insert_resource(AssetHandles {

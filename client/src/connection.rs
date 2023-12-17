@@ -15,7 +15,13 @@ use nope_the_hoop_proto::{
 use crate::{Args, AssetHandles, CurrentRole, HandleErrors, Role};
 
 #[derive(Resource)]
-pub struct ServerConnection(pub MessageStream<TcpStream>);
+pub struct ServerConnection(MessageStream<TcpStream>);
+
+impl ServerConnection {
+    pub fn send(&mut self, message: ToServerMessage) {
+        self.0.write_message(&message).handle();
+    }
+}
 
 pub fn setup(app: &mut App) {
     app.add_systems(Startup, setup_connect)
@@ -78,8 +84,5 @@ fn establish_connection(args: &Args) -> anyhow::Result<MessageStream<TcpStream>>
 }
 
 fn send_hello(server: &mut ServerConnection) {
-    server
-        .0
-        .write_message(&ToServerMessage::Hello { game_id: 123 })
-        .handle();
+    server.send(ToServerMessage::Hello { game_id: 123 });
 }
