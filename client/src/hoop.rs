@@ -4,7 +4,7 @@ use bevy::{
 };
 use nope_the_hoop_proto::message::{HorizontalDirection, ToServerMessage};
 
-use crate::{CurrentRole, HandleErrors, Role, ServerConnection};
+use crate::{connection::ServerConnection, CurrentRole, HandleErrors, Role};
 
 #[derive(Component)]
 pub struct Hoop;
