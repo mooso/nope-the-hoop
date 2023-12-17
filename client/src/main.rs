@@ -1,15 +1,14 @@
 mod ball;
+mod hoop;
 
 use std::{fmt::Display, net::TcpStream};
 
 use ball::add_ball;
-use bevy::{
-    prelude::*,
-    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
-};
+use bevy::prelude::*;
 use clap::Parser;
+use hoop::{add_hoop, move_hoop, HoopQuery};
 use nope_the_hoop_proto::{
-    message::{HorizontalDirection, ToClientMessage, ToServerMessage},
+    message::{ToClientMessage, ToServerMessage},
     state::{GameState, UpdateState},
     sync::MessageStream,
 };
@@ -36,9 +35,6 @@ enum Role {
     Ball { origin: Vec2 },
 }
 
-#[derive(Component)]
-struct Hoop;
-
 #[derive(Resource)]
 struct ServerConnection(MessageStream<TcpStream>);
 
@@ -47,8 +43,7 @@ struct CurrentRole(Role);
 
 #[derive(Resource)]
 struct AssetHandles {
-    hoop_mesh: Mesh2dHandle,
-    hoop_material: Handle<ColorMaterial>,
+    hoop_assets: hoop::AssetHandles,
     ball_assets: ball::AssetHandles,
 }
 
@@ -79,8 +74,9 @@ fn main() {
             Startup,
             (setup_connect, setup_view, setup_role, setup_assets),
         )
-        .add_systems(Update, (update_from_server, handle_input));
+        .add_systems(Update, update_from_server);
     ball::setup(&mut app);
+    hoop::setup(&mut app);
     app.run();
 }
 
@@ -107,14 +103,10 @@ fn setup_assets(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let hoop_material = materials.add(ColorMaterial::from(Color::GRAY));
-    let hoop_mesh = meshes
-        .add(shape::Quad::new(Vec2::new(50., 10.)).into())
-        .into();
+    let hoop_assets = hoop::AssetHandles::create(&mut materials, &mut meshes);
     let ball_assets = ball::AssetHandles::create(&mut materials, &mut meshes);
     commands.insert_resource(AssetHandles {
-        hoop_mesh,
-        hoop_material,
+        hoop_assets,
         ball_assets,
     });
 }
@@ -124,7 +116,7 @@ fn update_from_server(
     mut server: ResMut<ServerConnection>,
     mut current_role: ResMut<CurrentRole>,
     asset_handles: Res<AssetHandles>,
-    mut hoops: Query<(&Hoop, &mut Transform)>,
+    mut hoops: HoopQuery,
 ) {
     let messages = server.0.read_messages::<ToClientMessage>().handle();
     for message in messages {
@@ -140,7 +132,7 @@ fn update_from_server(
                 };
             }
             ToClientMessage::UpdateState(UpdateState::MoveHoop { x }) => {
-                hoops.single_mut().1.translation.x = x;
+                move_hoop(&mut hoops, x);
             }
             ToClientMessage::UpdateState(UpdateState::AddBall { position }) => {
                 add_ball(&mut commands, position, &asset_handles.ball_assets);
@@ -149,15 +141,7 @@ fn update_from_server(
                 hoop_x,
                 ball_positions,
             }) => {
-                commands.spawn((
-                    MaterialMesh2dBundle {
-                        mesh: asset_handles.hoop_mesh.clone(),
-                        material: asset_handles.hoop_material.clone(),
-                        transform: Transform::from_translation(Vec3::new(hoop_x, 0., 0.)),
-                        ..default()
-                    },
-                    Hoop,
-                ));
+                add_hoop(&mut commands, hoop_x, &asset_handles.hoop_assets);
                 for ball in ball_positions {
                     add_ball(&mut commands, ball, &asset_handles.ball_assets);
                 }
@@ -166,39 +150,10 @@ fn update_from_server(
     }
 }
 
-fn handle_input(
-    mut server: ResMut<ServerConnection>,
-    current_role: Res<CurrentRole>,
-    keyboard_input: Res<Input<KeyCode>>,
-    time: Res<Time>,
-) {
-    match current_role.0 {
-        Role::Hoop => {
-            if keyboard_input.pressed(KeyCode::Left) {
-                send_hoop_movement(&mut server, HorizontalDirection::Left, &time);
-            }
-            if keyboard_input.pressed(KeyCode::Right) {
-                send_hoop_movement(&mut server, HorizontalDirection::Right, &time);
-            }
-        }
-        _ => (),
-    }
-}
-
 fn establish_connection(args: &Args) -> anyhow::Result<MessageStream<TcpStream>> {
     let stream = TcpStream::connect((args.server.as_str(), args.port))?;
     stream.set_nonblocking(true)?;
     Ok(MessageStream::new(stream))
-}
-
-fn send_hoop_movement(server: &mut ServerConnection, direction: HorizontalDirection, time: &Time) {
-    server
-        .0
-        .write_message(&ToServerMessage::MoveHoop {
-            direction,
-            seconds_pressed: time.delta_seconds(),
-        })
-        .handle();
 }
 
 fn send_hello(server: &mut ServerConnection) {
