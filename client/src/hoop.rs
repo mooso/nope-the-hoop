@@ -23,9 +23,7 @@ pub struct AssetHandles {
 impl AssetHandles {
     pub fn create(materials: &mut Assets<ColorMaterial>, meshes: &mut Assets<Mesh>) -> Self {
         let hoop_material = materials.add(ColorMaterial::from(Color::GRAY));
-        let hoop_mesh = meshes
-            .add(shape::Quad::new(Vec2::new(50., 10.)).into())
-            .into();
+        let hoop_mesh = meshes.add(Rectangle::new(50., 10.)).into();
         Self {
             hoop_mesh,
             hoop_material,
@@ -52,16 +50,16 @@ pub fn move_hoop(hoops: &mut HoopQuery, x: f32) {
 fn handle_input(
     mut server: ResMut<ServerConnection>,
     current_role: Res<CurrentRole>,
-    keyboard_input: Res<Input<KeyCode>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
 ) {
     let Role::Hoop = current_role.0 else {
         return;
     };
-    if keyboard_input.pressed(KeyCode::Left) {
+    if keyboard_input.pressed(KeyCode::ArrowLeft) {
         send_hoop_movement(&mut server, HorizontalDirection::Left, &time);
     }
-    if keyboard_input.pressed(KeyCode::Right) {
+    if keyboard_input.pressed(KeyCode::ArrowRight) {
         send_hoop_movement(&mut server, HorizontalDirection::Right, &time);
     }
 }

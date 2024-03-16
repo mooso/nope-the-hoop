@@ -31,13 +31,9 @@ impl AssetHandles {
     pub fn create(materials: &mut Assets<ColorMaterial>, meshes: &mut Assets<Mesh>) -> Self {
         let ball_material = materials.add(ColorMaterial::from(Color::RED));
         let ball_mesh = meshes
-            .add(
-                shape::Circle {
-                    radius: BALL_RADIUS,
-                    ..default()
-                }
-                .into(),
-            )
+            .add(Circle {
+                radius: BALL_RADIUS,
+            })
             .into();
         Self {
             ball_mesh,
@@ -64,7 +60,7 @@ fn setup_throw_angle(mut commands: Commands) {
 
 fn handle_input(
     current_role: Res<CurrentRole>,
-    keyboard_input: Res<Input<KeyCode>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut throw_angle: ResMut<ThrowAngle>,
 ) {
@@ -72,10 +68,10 @@ fn handle_input(
         return;
     };
     let mut factor = 0.;
-    if keyboard_input.pressed(KeyCode::Left) {
+    if keyboard_input.pressed(KeyCode::ArrowLeft) {
         factor += 1.;
     }
-    if keyboard_input.pressed(KeyCode::Right) {
+    if keyboard_input.pressed(KeyCode::ArrowRight) {
         factor -= 1.;
     }
     throw_angle.0 += GUIDE_SPEED * factor * time.delta_seconds();
