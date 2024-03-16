@@ -26,7 +26,8 @@ struct Args {
 enum Role {
     Unknown,
     Hoop,
-    Ball { origin: Vec2 },
+    Ball { id: u32 },
+    Observer,
 }
 
 #[derive(Resource)]

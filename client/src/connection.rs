@@ -1,7 +1,7 @@
 use std::net::TcpStream;
 
 use crate::{
-    ball::add_ball,
+    ball::{add_ball, move_ball, remove_ball, BallQuery},
     hoop::{add_hoop, move_hoop, HoopQuery},
 };
 use bevy::prelude::*;
@@ -44,6 +44,7 @@ fn update_from_server(
     mut current_role: ResMut<CurrentRole>,
     asset_handles: Res<AssetHandles>,
     mut hoops: HoopQuery,
+    mut balls: BallQuery,
 ) {
     let messages = server.0.read_messages::<ToClientMessage>().handle();
     for message in messages {
@@ -52,26 +53,34 @@ fn update_from_server(
                 trace!("I'm a hoop");
                 current_role.0 = Role::Hoop;
             }
-            ToClientMessage::EstablishAsBall { origin } => {
+            ToClientMessage::EstablishAsBall { id } => {
                 trace!("I'm a ball");
-                current_role.0 = Role::Ball {
-                    origin: Vec2::new(origin.x, origin.y),
-                };
+                current_role.0 = Role::Ball { id };
             }
             ToClientMessage::UpdateState(UpdateState::MoveHoop { x }) => {
                 move_hoop(&mut hoops, x);
             }
-            ToClientMessage::UpdateState(UpdateState::AddBall { position }) => {
-                add_ball(&mut commands, position, &asset_handles.ball_assets);
+            ToClientMessage::UpdateState(UpdateState::AddBall { id, position }) => {
+                add_ball(&mut commands, id, position, &asset_handles.ball_assets);
+            }
+            ToClientMessage::UpdateState(UpdateState::RemoveBall { id }) => {
+                remove_ball(&mut commands, id, &mut balls);
+            }
+            ToClientMessage::UpdateState(UpdateState::MoveBall { id, position }) => {
+                move_ball(id, position, &mut balls);
             }
             ToClientMessage::InitialState(GameState {
                 hoop_x,
                 ball_positions,
             }) => {
                 add_hoop(&mut commands, hoop_x, &asset_handles.hoop_assets);
-                for ball in ball_positions {
-                    add_ball(&mut commands, ball, &asset_handles.ball_assets);
+                for (id, ball) in ball_positions {
+                    add_ball(&mut commands, id, ball, &asset_handles.ball_assets);
                 }
+            }
+            ToClientMessage::EstablishAsObserver => {
+                trace!("I'm an observer");
+                current_role.0 = Role::Observer;
             }
         }
     }

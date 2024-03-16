@@ -12,7 +12,12 @@ const GUIDE_LENGTH: f32 = 20.;
 const GUIDE_SPEED: f32 = 10.;
 
 #[derive(Component)]
-struct Ball;
+pub struct Ball {
+    id: u32,
+}
+
+pub type BallQuery<'world, 'state, 'a> =
+    Query<'world, 'state, (Entity, &'a Ball, &'a mut Transform)>;
 
 #[derive(Resource)]
 struct ThrowAngle(f32);
@@ -42,7 +47,7 @@ impl AssetHandles {
     }
 }
 
-pub fn add_ball(commands: &mut Commands, position: Point, asset_handles: &AssetHandles) {
+pub fn add_ball(commands: &mut Commands, id: u32, position: Point, asset_handles: &AssetHandles) {
     commands.spawn((
         MaterialMesh2dBundle {
             mesh: asset_handles.ball_mesh.clone(),
@@ -50,8 +55,23 @@ pub fn add_ball(commands: &mut Commands, position: Point, asset_handles: &AssetH
             transform: Transform::from_translation(Vec3::new(position.x, position.y, 0.)),
             ..default()
         },
-        Ball,
+        Ball { id },
     ));
+}
+
+pub fn remove_ball(commands: &mut Commands, id: u32, ball_query: &mut BallQuery) {
+    let Some((entity, _, _)) = ball_query.iter().find(|(_, b, _)| b.id == id) else {
+        return;
+    };
+    commands.entity(entity).despawn();
+}
+
+pub fn move_ball(id: u32, position: Point, ball_query: &mut BallQuery) {
+    let Some((_, _, mut transform)) = ball_query.iter_mut().find(|(_, b, _)| b.id == id) else {
+        return;
+    };
+    transform.translation.x = position.x;
+    transform.translation.y = position.y;
 }
 
 fn setup_throw_angle(mut commands: Commands) {
@@ -77,12 +97,21 @@ fn handle_input(
     throw_angle.0 += GUIDE_SPEED * factor * time.delta_seconds();
 }
 
-fn draw_guide(mut gizmos: Gizmos, current_role: Res<CurrentRole>, throw_angle: Res<ThrowAngle>) {
-    let Role::Ball { origin } = current_role.0 else {
+fn draw_guide(
+    mut gizmos: Gizmos,
+    current_role: Res<CurrentRole>,
+    throw_angle: Res<ThrowAngle>,
+    ball_query: BallQuery,
+) {
+    let Role::Ball { id } = current_role.0 else {
+        return;
+    };
+    let Some((_, _, transform)) = ball_query.iter().find(|(_, b, _)| b.id == id) else {
         return;
     };
     // Unit vector in the direction of the throw
     let throw_direction = Vec2::new(throw_angle.0.cos(), throw_angle.0.sin());
-    let guide_start = origin + throw_direction * (BALL_RADIUS + GUIDE_MARGIN);
+    let guide_start =
+        transform.translation.truncate() + throw_direction * (BALL_RADIUS + GUIDE_MARGIN);
     gizmos.ray_2d(guide_start, throw_direction * GUIDE_LENGTH, Color::WHITE);
 }

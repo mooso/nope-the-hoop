@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Context};
 use futures::{future::select_all, StreamExt};
 use nope_the_hoop_proto::{
@@ -82,8 +84,9 @@ async fn game_loop(
 ) -> anyhow::Result<()> {
     let mut game = GameState {
         hoop_x: INITIAL_HOOP_X,
-        ball_positions: vec![SINGLE_BALL_POSITION],
+        ball_positions: HashMap::new(),
     };
+    game.ball_positions.insert(0, SINGLE_BALL_POSITION);
     let mut clients: Vec<Client> = vec![];
     loop {
         let mut updates = vec![];
@@ -98,7 +101,7 @@ async fn game_loop(
                 } else if clients.len() == 1 {
                     info!("Game {} has its first ball", id);
                     write_message(&mut client.write, &ToClientMessage::EstablishAsBall {
-                        origin: SINGLE_BALL_POSITION,
+                        id: 0,
                     }).await?;
                 }
                 clients.push(client);
@@ -125,6 +128,12 @@ async fn game_loop(
                         let delta_x = sign * HOOOP_SPEED * seconds_pressed;
                         game.hoop_x = (game.hoop_x + delta_x).clamp(HOOP_MIN_X, HOOP_MAX_X);
                         updates.push(ToClientMessage::UpdateState(UpdateState::MoveHoop { x: game.hoop_x }));
+                    }
+                    ToServerMessage::ShootBall {
+                        id,
+                        ..
+                    } => {
+                        trace!("Client {} in game {id} shot ball: {:?} (not implemented)", client_index, id);
                     }
                     ToServerMessage::Hello { .. } => {
                         error!("Client {} in game {id} sent Hello after initial hello - terminating", client_index);

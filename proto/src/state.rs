@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
@@ -9,13 +11,15 @@ pub struct Point {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct GameState {
     pub hoop_x: f32,
-    pub ball_positions: Vec<Point>,
+    pub ball_positions: HashMap<u32, Point>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum UpdateState {
     MoveHoop { x: f32 },
-    AddBall { position: Point },
+    AddBall { id: u32, position: Point },
+    MoveBall { id: u32, position: Point },
+    RemoveBall { id: u32 },
 }
 
 impl UpdateState {
@@ -24,8 +28,14 @@ impl UpdateState {
             UpdateState::MoveHoop { x } => {
                 state.hoop_x = *x;
             }
-            UpdateState::AddBall { position } => {
-                state.ball_positions.push(*position);
+            UpdateState::AddBall { id, position } => {
+                let _previous = state.ball_positions.insert(*id, *position);
+            }
+            UpdateState::MoveBall { id, position } => {
+                let _previous = state.ball_positions.insert(*id, *position);
+            }
+            UpdateState::RemoveBall { id } => {
+                let _previous = state.ball_positions.remove(id);
             }
         }
     }
