@@ -43,8 +43,7 @@ fn update_from_server(
     mut server: ResMut<ServerConnection>,
     mut current_role: ResMut<CurrentRole>,
     asset_handles: Res<AssetHandles>,
-    mut hoops: HoopQuery,
-    mut balls: BallQuery,
+    mut hoops_and_balls: ParamSet<(HoopQuery, BallQuery)>,
 ) {
     let messages = server.0.read_messages::<ToClientMessage>().handle();
     for message in messages {
@@ -58,16 +57,16 @@ fn update_from_server(
                 current_role.0 = Role::Ball { id };
             }
             ToClientMessage::UpdateState(UpdateState::MoveHoop { x }) => {
-                move_hoop(&mut hoops, x);
+                move_hoop(&mut hoops_and_balls.p0(), x);
             }
             ToClientMessage::UpdateState(UpdateState::AddBall { id, position }) => {
                 add_ball(&mut commands, id, position, &asset_handles.ball_assets);
             }
             ToClientMessage::UpdateState(UpdateState::RemoveBall { id }) => {
-                remove_ball(&mut commands, id, &mut balls);
+                remove_ball(&mut commands, id, &mut hoops_and_balls.p1());
             }
             ToClientMessage::UpdateState(UpdateState::MoveBall { id, position }) => {
-                move_ball(id, position, &mut balls);
+                move_ball(id, position, &mut hoops_and_balls.p1());
             }
             ToClientMessage::InitialState(GameState {
                 hoop_x,
