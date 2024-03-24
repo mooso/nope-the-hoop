@@ -2,22 +2,24 @@ use bevy::{
     prelude::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
-use nope_the_hoop_proto::state::Point;
+use nope_the_hoop_proto::{message::ToServerMessage, state::Point};
 
-use crate::{CurrentRole, Role};
+use crate::{connection::ServerConnection, CurrentRole, Role};
 
 const BALL_RADIUS: f32 = 10.;
 const GUIDE_MARGIN: f32 = 1.;
 const GUIDE_LENGTH: f32 = 20.;
 const GUIDE_SPEED: f32 = 10.;
+const MAX_SHOOT_PRESS: f32 = 1.;
 
 #[derive(Component)]
 pub struct Ball {
     id: u32,
+    time_shot_start: Option<f32>,
 }
 
 pub type BallQuery<'world, 'state, 'a> =
-    Query<'world, 'state, (Entity, &'a Ball, &'a mut Transform)>;
+    Query<'world, 'state, (Entity, &'a mut Ball, &'a mut Transform)>;
 
 #[derive(Resource)]
 struct ThrowAngle(f32);
@@ -55,7 +57,10 @@ pub fn add_ball(commands: &mut Commands, id: u32, position: Point, asset_handles
             transform: Transform::from_translation(Vec3::new(position.x, position.y, 0.)),
             ..default()
         },
-        Ball { id },
+        Ball {
+            id,
+            time_shot_start: None,
+        },
     ));
 }
 
@@ -79,14 +84,36 @@ fn setup_throw_angle(mut commands: Commands) {
 }
 
 fn handle_input(
+    mut server: ResMut<ServerConnection>,
     current_role: Res<CurrentRole>,
+    mut ball_query: BallQuery,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut throw_angle: ResMut<ThrowAngle>,
 ) {
-    let Role::Ball { .. } = current_role.0 else {
+    let Role::Ball { id } = current_role.0 else {
         return;
     };
+    let Some((_, mut ball, _)) = ball_query.iter_mut().find(|(_, b, _)| b.id == id) else {
+        return;
+    };
+    // Handle shooting
+    if let Some(time_shot_start) = ball.time_shot_start {
+        let seconds_pressed = time.elapsed_seconds() - time_shot_start;
+        if keyboard_input.just_released(KeyCode::Space) || seconds_pressed > MAX_SHOOT_PRESS {
+            trace!("Finishing shot");
+            ball.time_shot_start = None;
+            server.send(ToServerMessage::ShootBall {
+                id,
+                angle: throw_angle.0,
+                seconds_pressed,
+            });
+        }
+    } else if keyboard_input.just_pressed(KeyCode::Space) {
+        ball.time_shot_start = Some(time.elapsed_seconds());
+        trace!("Starting shot");
+    }
+    // Handle aiming
     let mut factor = 0.;
     if keyboard_input.pressed(KeyCode::ArrowLeft) {
         factor += 1.;
