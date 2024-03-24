@@ -12,10 +12,17 @@ const GUIDE_LENGTH: f32 = 20.;
 const GUIDE_SPEED: f32 = 10.;
 const MAX_SHOOT_PRESS: f32 = 1.;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum BallState {
+    Aiming,
+    Moving,
+}
+
 #[derive(Component)]
 pub struct Ball {
     id: u32,
     time_shot_start: Option<f32>,
+    state: BallState,
 }
 
 pub type BallQuery<'world, 'state, 'a> =
@@ -60,6 +67,7 @@ pub fn add_ball(commands: &mut Commands, id: u32, position: Point, asset_handles
         Ball {
             id,
             time_shot_start: None,
+            state: BallState::Aiming,
         },
     ));
 }
@@ -97,12 +105,16 @@ fn handle_input(
     let Some((_, mut ball, _)) = ball_query.iter_mut().find(|(_, b, _)| b.id == id) else {
         return;
     };
+    if ball.state == BallState::Moving {
+        return;
+    }
     // Handle shooting
     if let Some(time_shot_start) = ball.time_shot_start {
         let seconds_pressed = time.elapsed_seconds() - time_shot_start;
         if keyboard_input.just_released(KeyCode::Space) || seconds_pressed > MAX_SHOOT_PRESS {
             trace!("Finishing shot");
             ball.time_shot_start = None;
+            ball.state = BallState::Moving;
             server.send(ToServerMessage::ShootBall {
                 id,
                 angle: throw_angle.0,
@@ -133,9 +145,12 @@ fn draw_guide(
     let Role::Ball { id } = current_role.0 else {
         return;
     };
-    let Some((_, _, transform)) = ball_query.iter().find(|(_, b, _)| b.id == id) else {
+    let Some((_, ball, transform)) = ball_query.iter().find(|(_, b, _)| b.id == id) else {
         return;
     };
+    if ball.state == BallState::Moving {
+        return;
+    }
     // Unit vector in the direction of the throw
     let throw_direction = Vec2::new(throw_angle.0.cos(), throw_angle.0.sin());
     let guide_start =
