@@ -24,6 +24,7 @@ const SINGLE_BALL_POSITION: Point = Point { x: -100., y: 10. };
 const BALL_SPEED_PER_SECOND_PRESSED: f32 = 100.;
 const BALL_MAX_SPEED: f32 = 100.;
 const FRAME_DURATION: Duration = Duration::from_millis(16);
+const GRAVITY: f32 = 9.81;
 
 pub struct GameHost {
     connection_tx: mpsc::Sender<(ServerMessageStream, OwnedWriteHalf)>,
@@ -92,7 +93,7 @@ async fn game_loop(
     };
     let mut ball_velocities = HashMap::new();
     game.ball_positions.insert(0, SINGLE_BALL_POSITION);
-    ball_velocities.insert(0, Point::default());
+    ball_velocities.insert(0, None);
     let mut clients: Vec<Client> = vec![];
     let mut frame_timer = tokio::time::interval(FRAME_DURATION);
     frame_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -145,7 +146,7 @@ async fn game_loop(
                     } => {
                         trace!("Client {} in game {id} shot ball: {:?}", client_index, id);
                         let velocity = calculate_ball_velocity(angle, seconds_pressed);
-                        ball_velocities.insert(id, velocity);
+                        ball_velocities.insert(id, Some(velocity));
 
                     }
                     ToServerMessage::Hello { .. } => {
@@ -158,10 +159,10 @@ async fn game_loop(
                 let now = Instant::now();
                 let elapsed = now - last_frame_time;
                 last_frame_time = now;
-                for (id, velocity) in &ball_velocities {
-                    if *velocity == Point::default() {
+                for (id, velocity) in ball_velocities.iter_mut() {
+                    let Some(velocity) = velocity else {
                         continue;
-                    }
+                    };
                     let Some(ball) = game.ball_positions.get_mut(id) else {
                         continue;
                     };
@@ -171,6 +172,7 @@ async fn game_loop(
                         id: *id,
                         position: *ball,
                     }));
+                    velocity.y -= GRAVITY * elapsed.as_secs_f32();
                 }
             }
         }
