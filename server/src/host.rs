@@ -1,10 +1,10 @@
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use futures::{future::select_all, StreamExt};
 use nope_the_hoop_proto::{
-    message::{HorizontalDirection, ToClientMessage, ToServerMessage},
-    state::{GameState, Point, UpdateState},
+    message::{ToClientMessage, ToServerMessage},
+    state::UpdateState,
     stream::{write_message, MessageStream},
 };
 use tokio::{
@@ -14,17 +14,11 @@ use tokio::{
 };
 use tracing::{error, info, trace};
 
+use crate::sim::Game;
+
 pub(crate) type ServerMessageStream = MessageStream<OwnedReadHalf, ToServerMessage>;
 
-const INITIAL_HOOP_X: f32 = 100.;
-const HOOP_MIN_X: f32 = 0.;
-const HOOP_MAX_X: f32 = 200.;
-const HOOOP_SPEED: f32 = 100.;
-const SINGLE_BALL_POSITION: Point = Point { x: -100., y: 10. };
-const BALL_SPEED_PER_SECOND_PRESSED: f32 = 100.;
-const BALL_MAX_SPEED: f32 = 100.;
 const FRAME_DURATION: Duration = Duration::from_millis(16);
-const GRAVITY: f32 = 9.81;
 
 pub struct GameHost {
     connection_tx: mpsc::Sender<(ServerMessageStream, OwnedWriteHalf)>,
@@ -87,13 +81,7 @@ async fn game_loop(
     mut connection_rx: mpsc::Receiver<(ServerMessageStream, OwnedWriteHalf)>,
     id: u32,
 ) -> anyhow::Result<()> {
-    let mut game = GameState {
-        hoop_x: INITIAL_HOOP_X,
-        ball_positions: HashMap::new(),
-    };
-    let mut ball_velocities = HashMap::new();
-    game.ball_positions.insert(0, SINGLE_BALL_POSITION);
-    ball_velocities.insert(0, None);
+    let mut game = Game::default();
     let mut clients: Vec<Client> = vec![];
     let mut frame_timer = tokio::time::interval(FRAME_DURATION);
     frame_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -103,7 +91,7 @@ async fn game_loop(
         tokio::select! {
             new_connection = connection_rx.recv() => {
                 let (read, mut write) = new_connection.context("Failed to receive connection")?;
-                write_message(&mut write, &ToClientMessage::InitialState(game.clone())).await?;
+                write_message(&mut write, &ToClientMessage::InitialState(game.state().clone())).await?;
                 let mut client = Client { read, write };
                 if clients.is_empty() {
                     info!("Game {} has its first client", id);
@@ -131,13 +119,8 @@ async fn game_loop(
                         seconds_pressed,
                     } => {
                         trace!("Client {} in game {id} moved hoop: {:?}", client_index, direction);
-                        let sign = match direction {
-                            HorizontalDirection::Left => -1.,
-                            HorizontalDirection::Right => 1.,
-                        };
-                        let delta_x = sign * HOOOP_SPEED * seconds_pressed;
-                        game.hoop_x = (game.hoop_x + delta_x).clamp(HOOP_MIN_X, HOOP_MAX_X);
-                        updates.push(ToClientMessage::UpdateState(UpdateState::MoveHoop { x: game.hoop_x }));
+                        game.move_hoop(direction, seconds_pressed);
+                        updates.push(ToClientMessage::UpdateState(UpdateState::MoveHoop { x: game.state().hoop_x }));
                     }
                     ToServerMessage::ShootBall {
                         id,
@@ -145,9 +128,7 @@ async fn game_loop(
                         seconds_pressed,
                     } => {
                         trace!("Client {} in game {id} shot ball: {:?}", client_index, id);
-                        let velocity = calculate_ball_velocity(angle, seconds_pressed);
-                        ball_velocities.insert(id, Some(velocity));
-
+                        game.shoot_ball(id, angle, seconds_pressed);
                     }
                     ToServerMessage::Hello { .. } => {
                         error!("Client {} in game {id} sent Hello after initial hello - terminating", client_index);
@@ -159,21 +140,7 @@ async fn game_loop(
                 let now = Instant::now();
                 let elapsed = now - last_frame_time;
                 last_frame_time = now;
-                for (id, velocity) in ball_velocities.iter_mut() {
-                    let Some(velocity) = velocity else {
-                        continue;
-                    };
-                    let Some(ball) = game.ball_positions.get_mut(id) else {
-                        continue;
-                    };
-                    ball.x += velocity.x * elapsed.as_secs_f32();
-                    ball.y += velocity.y * elapsed.as_secs_f32();
-                    updates.push(ToClientMessage::UpdateState(UpdateState::MoveBall {
-                        id: *id,
-                        position: *ball,
-                    }));
-                    velocity.y -= GRAVITY * elapsed.as_secs_f32();
-                }
+                game.update(elapsed, &mut updates);
             }
         }
         for update in updates {
@@ -184,11 +151,4 @@ async fn game_loop(
             }
         }
     }
-}
-
-fn calculate_ball_velocity(angle: f32, seconds_pressed: f32) -> Point {
-    let speed = (seconds_pressed * BALL_SPEED_PER_SECOND_PRESSED).clamp(0., BALL_MAX_SPEED);
-    let x = angle.cos() * speed;
-    let y = angle.sin() * speed;
-    Point { x, y }
 }

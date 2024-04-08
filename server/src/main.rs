@@ -11,6 +11,7 @@ use tracing::info;
 use crate::host::GameHost;
 
 mod host;
+mod sim;
 
 #[derive(Parser)]
 #[command(
